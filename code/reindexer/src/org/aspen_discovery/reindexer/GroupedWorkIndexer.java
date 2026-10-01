@@ -39,6 +39,9 @@ public class GroupedWorkIndexer {
 	private int deletionCommitInterval = 1000;
 	private int indexCommitInterval = 10000;
 	private boolean waitAfterDeleteCommit = false;
+	private int solrThreadCount = 1;
+	private int solrQueueSize = 25;
+	private int numReindexWorkerThreads = 1;
 	private boolean removeTheWordSeriesFromEndOfSeries;
 	private int totalRecordsHandled = 0;
 	private ConcurrentUpdateHttp2SolrClient updateServer;
@@ -240,7 +243,7 @@ public class GroupedWorkIndexer {
 
 		//Check to see if we should store record details in Solr
 		try{
-			PreparedStatement systemVariablesStmt = dbConn.prepareStatement("SELECT storeRecordDetailsInSolr, storeRecordDetailsInDatabase, indexVersion, searchVersion, processEmptyGroupedWorks, enableNovelistSeriesIntegration, deletionCommitInterval, waitAfterDeleteCommit, removeTheWordSeriesFromEndOfSeries, hooplaVersion, indexCommitInterval from system_variables");
+			PreparedStatement systemVariablesStmt = dbConn.prepareStatement("SELECT storeRecordDetailsInSolr, storeRecordDetailsInDatabase, indexVersion, searchVersion, processEmptyGroupedWorks, enableNovelistSeriesIntegration, deletionCommitInterval, waitAfterDeleteCommit, removeTheWordSeriesFromEndOfSeries, hooplaVersion, indexCommitInterval, solrThreadCount, solrQueueSize, numReindexWorkerThreads from system_variables");
 			ResultSet systemVariablesRS = systemVariablesStmt.executeQuery();
 			if (systemVariablesRS.next()){
 				this.storeRecordDetailsInSolr = systemVariablesRS.getBoolean("storeRecordDetailsInSolr");
@@ -256,6 +259,12 @@ public class GroupedWorkIndexer {
 				}
 				this.removeTheWordSeriesFromEndOfSeries = systemVariablesRS.getBoolean("removeTheWordSeriesFromEndOfSeries");
 				this.hooplaVersion = systemVariablesRS.getInt("hooplaVersion");
+				try { this.solrThreadCount = systemVariablesRS.getInt("solrThreadCount"); } catch (Exception ignored) {}
+				try { this.solrQueueSize = systemVariablesRS.getInt("solrQueueSize"); } catch (Exception ignored) {}
+				try { this.numReindexWorkerThreads = systemVariablesRS.getInt("numReindexWorkerThreads"); } catch (Exception ignored) {}
+				if (this.solrThreadCount < 1) this.solrThreadCount = 1;
+				if (this.solrQueueSize < 10) this.solrQueueSize = 25;
+				if (this.numReindexWorkerThreads < 1) this.numReindexWorkerThreads = 1;
 			}
 			systemVariablesRS.close();
 			systemVariablesStmt.close();
@@ -397,9 +406,12 @@ public class GroupedWorkIndexer {
 		Http2SolrClient http2Client = new Http2SolrClient.Builder().build();
 		try {
 			updateServer = new ConcurrentUpdateHttp2SolrClient.Builder(solrUrl, http2Client)
-				.withThreadCount(1)
-				.withQueueSize(25)
+				.withThreadCount(solrThreadCount)
+				.withQueueSize(solrQueueSize)
 				.build();
+			if (setupMessageLogged.get()) {
+				logEntry.addNote("Solr client: threadCount=" + solrThreadCount + ", queueSize=" + solrQueueSize);
+			}
 		}catch (OutOfMemoryError e) {
 			logger.error("Unable to create solr client, out of memory", e);
 			System.exit(-7);
@@ -610,6 +622,10 @@ public class GroupedWorkIndexer {
 
 	public boolean isOkToIndex(){
 		return okToIndex;
+	}
+
+	public int getNumReindexWorkerThreads(){
+		return numReindexWorkerThreads;
 	}
 
 	TreeSet<String> overDriveRecordsSkipped = new TreeSet<>();

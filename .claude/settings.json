@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -n \"background\\\\|queue\\\\|job\\\\|async\\\\|spawn\" /Users/brendan/git/aspen-discovery/code/web/services/API/*.php)",
+      "Bash(grep -n \"BackgroundProcess\\\\|runBackgroundProcess\" /Users/brendan/git/aspen-discovery/code/web/services/API/*.php)",
+      "Bash(grep -n \"new BackgroundProcess\\\\|BackgroundProcess\" /Users/brendan/git/aspen-discovery/code/web/services/API/*.php)",
+      "Bash(ls -la /Users/brendan/git/aspen-discovery/code/cron/*.php)",
+      "Bash(java -version)",
+      "Bash(javac -version)",
+      "Bash(./build.sh)",
+      "Bash(scp code/parallel_reindexer/parallel_reindexer.jar aspen-server:/usr/local/aspen-discovery/code/parallel_reindexer/)",
+      "Read(//Users/brendan/.ssh/**)",
+      "Read(//private/etc/**)",
+      "Bash(docker exec:*)",
+      "Bash(curl -s 'http://localhost:8084/solr/admin/cores?action=STATUS&wt=json')",
+      "Bash(python3 -m json.tool)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f'Docs remaining: {d[\\\\\"response\\\\\"][\\\\\"numFound\\\\\"]}'\\)\")",
+      "Bash(curl -s 'http://localhost:8084/solr/grouped_works_v2/update?optimize=true&waitSearcher=true' -H 'Content-Type: text/xml' -d '<commit/>')",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f'Solr docs: {d[\\\\\"response\\\\\"][\\\\\"numFound\\\\\"]}'\\)\")",
+      "Read(//Users/brendan/git/aspen-discovery/**)",
+      "Read(//Users/brendan/git/aspen-discovery/{print \"CPU:\", $3\"%, MEM:\", $6/**)"
+    ]
+  }
+}
