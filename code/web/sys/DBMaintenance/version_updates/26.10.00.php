@@ -123,5 +123,13 @@ function getUpdates26_10_00(): array {
 			],
 		], //aggregate_aspen_usage
 
+		'add_parallel_reindex_worker_threads' => [
+			'title' => 'Add parallel reindex worker threads',
+			'description' => 'Add option to run the full grouped work reindex across multiple worker threads',
+			'sql' => [
+				'ALTER TABLE system_variables ADD COLUMN numReindexWorkerThreads INT UNSIGNED NOT NULL DEFAULT 1',
+			]
+		], //add_parallel_reindex_worker_threads
+
 	];
 }

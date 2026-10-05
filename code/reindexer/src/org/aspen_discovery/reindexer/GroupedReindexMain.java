@@ -19,6 +19,8 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class GroupedReindexMain {
 	private static BaseIndexingLogEntry logEntry;
@@ -147,8 +149,15 @@ public class GroupedReindexMain {
 				} else if (cleanupIndexTables) {
 					cleanupIndexTables();
 				} else {
-					logger.info("Running Reindex");
-					groupedWorkIndexer.processGroupedWorks();
+					int numWorkerThreads = groupedWorkIndexer.getNumReindexWorkerThreads();
+					if (numWorkerThreads > 1 && fullReindex) {
+						logger.info("Running Threaded Reindex with " + numWorkerThreads + " workers");
+						logEntry.addNote("Running threaded reindex with " + numWorkerThreads + " worker threads");
+						processGroupedWorksThreaded(groupedWorkIndexer, numWorkerThreads, regroupAllRecords);
+					} else {
+						logger.info("Running Reindex (single-threaded)");
+						groupedWorkIndexer.processGroupedWorks();
+					}
 					if (isNightlyReindex) {
 						cleanupIndexTables();
 					}
@@ -228,6 +237,186 @@ public class GroupedReindexMain {
 		} catch (SQLException e) {
 			logger.error("Error cleaning up index tables", e);
 		}
+	}
+
+	/**
+	 * Multi-threaded grouped work processing. Creates N worker threads, each with its own
+	 * GroupedWorkIndexer instance and DB connection. A producer thread reads work IDs from
+	 * the database and distributes them via a BlockingQueue.
+	 *
+	 * Falls back gracefully: if numWorkerThreads=1 or not a full reindex, the standard
+	 * single-threaded processGroupedWorks() is used instead (caller handles this).
+	 */
+	private static void processGroupedWorksThreaded(GroupedWorkIndexer coordinatorIndexer, int numWorkerThreads, boolean regroupAllRecords) {
+		String jdbcUrl = ConfigUtil.cleanIniValue(configIni.get("Database", "database_aspen_jdbc"));
+		long indexStartTime = new Date().getTime() / 1000;
+		final AtomicLong totalProcessed = new AtomicLong(0);
+		final AtomicLong totalErrors = new AtomicLong(0);
+		long startMs = System.currentTimeMillis();
+
+		// Count total works
+		long totalWorks = 0;
+		try {
+			PreparedStatement countStmt = dbConn.prepareStatement(
+				"SELECT COUNT(DISTINCT permanent_id) as cnt FROM grouped_work INNER JOIN grouped_work_records ON grouped_work.id = groupedWorkId");
+			ResultSet countRS = countStmt.executeQuery();
+			if (countRS.next()) totalWorks = countRS.getLong("cnt");
+			countRS.close();
+			countStmt.close();
+		} catch (SQLException e) {
+			logger.error("Error counting works", e);
+		}
+		logEntry.addNote("Threaded reindex: " + totalWorks + " works to process with " + numWorkerThreads + " threads");
+		final long totalWorksForLog = totalWorks;
+
+		// Work queue with backpressure
+		BlockingQueue<long[]> workQueue = new LinkedBlockingQueue<>(10000);
+		// Sentinel: {-1} signals worker to stop
+		final long[] POISON_PILL = new long[]{-1};
+
+		// Producer thread: reads all work IDs into queue (uses its own DB connection)
+		Thread producer = new Thread(() -> {
+			Thread.currentThread().setName("reindex-producer");
+			try {
+				Connection producerConn = DriverManager.getConnection(jdbcUrl);
+				producerConn.prepareCall("SET collation_connection = utf8mb4_general_ci").execute();
+				producerConn.prepareCall("SET NAMES utf8mb4").execute();
+				PreparedStatement stmt = producerConn.prepareStatement(
+					"SELECT grouped_work.id, permanent_id, grouping_category, date_updated " +
+					"FROM grouped_work INNER JOIN grouped_work_records ON grouped_work.id = groupedWorkId " +
+					"GROUP BY permanent_id",
+					ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
+				stmt.setFetchSize(Integer.MIN_VALUE); // MySQL streaming mode
+				ResultSet rs = stmt.executeQuery();
+				while (rs.next()) {
+					long id = rs.getLong("id");
+					// Pack id into array — permanentId and groupingCategory stored as hash for lookup
+					workQueue.put(new long[]{id});
+				}
+				rs.close();
+				stmt.close();
+				producerConn.close();
+			} catch (Exception e) {
+				logger.error("Producer error", e);
+			} finally {
+				for (int i = 0; i < numWorkerThreads; i++) {
+					try { workQueue.put(POISON_PILL); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+				}
+			}
+		}, "reindex-producer");
+		producer.start();
+
+		// Worker threads
+		ExecutorService workerPool = Executors.newFixedThreadPool(numWorkerThreads);
+		Future<?>[] futures = new Future<?>[numWorkerThreads];
+
+		for (int i = 0; i < numWorkerThreads; i++) {
+			final int workerId = i;
+			futures[i] = workerPool.submit(() -> {
+				Thread.currentThread().setName("reindex-worker-" + workerId);
+				Connection workerDbConn = null;
+				GroupedWorkIndexer workerIndexer = null;
+				try {
+					workerDbConn = DriverManager.getConnection(jdbcUrl);
+					workerDbConn.prepareCall("SET collation_connection = utf8mb4_general_ci").execute();
+					workerDbConn.prepareCall("SET NAMES utf8mb4").execute();
+					// Workers never clear the index — coordinator handles that
+					workerIndexer = new GroupedWorkIndexer(serverName, workerDbConn, configIni, fullReindex, false, regroupAllRecords, logEntry, logger);
+					if (!workerIndexer.isOkToIndex()) {
+						logger.error("Worker-" + workerId + " indexer not OK, stopping");
+						return;
+					}
+
+					// Prepare statement to load work details by ID
+					PreparedStatement getWorkStmt = workerDbConn.prepareStatement(
+						"SELECT id, permanent_id, grouping_category, date_updated FROM grouped_work WHERE id = ?",
+						ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
+					PreparedStatement setLastUpdatedTime = workerDbConn.prepareStatement(
+						"UPDATE grouped_work SET date_updated = ? WHERE id = ?");
+
+					while (true) {
+						long[] work = workQueue.take();
+						if (work == POISON_PILL) break;
+
+						long id = work[0];
+						try {
+							getWorkStmt.setLong(1, id);
+							ResultSet workRS = getWorkStmt.executeQuery();
+							if (workRS.next()) {
+								String permanentId = workRS.getString("permanent_id");
+								String groupingCategory = workRS.getString("grouping_category");
+								Long dateUpdated = workRS.getLong("date_updated");
+								if (workRS.wasNull()) dateUpdated = null;
+
+								workerIndexer.processGroupedWork(id, permanentId, groupingCategory);
+
+								long processed = totalProcessed.incrementAndGet();
+								if (logEntry instanceof NightlyIndexLogEntry) {
+									((NightlyIndexLogEntry) logEntry).incNumWorksProcessed();
+								}
+
+								if (dateUpdated == null) {
+									setLastUpdatedTime.setLong(1, indexStartTime - 1);
+									setLastUpdatedTime.setLong(2, id);
+									setLastUpdatedTime.executeUpdate();
+								}
+
+								if (processed % 10000 == 0) {
+									double elapsedSec = (System.currentTimeMillis() - startMs) / 1000.0;
+									double rate = processed / elapsedSec;
+									double pct = totalWorksForLog > 0 ? processed * 100.0 / totalWorksForLog : 0;
+									logger.info(String.format("Threaded reindex: %,d / %,d (%.1f%%) | %.0f works/sec | errors: %d",
+										processed, totalWorksForLog, pct, rate, totalErrors.get()));
+								}
+							}
+							workRS.close();
+						} catch (Exception e) {
+							totalErrors.incrementAndGet();
+							logger.error("Worker-" + workerId + " error processing work id " + id, e);
+						}
+					}
+
+					getWorkStmt.close();
+					setLastUpdatedTime.close();
+				} catch (Exception e) {
+					logger.error("Worker-" + workerId + " fatal error", e);
+				} finally {
+					if (workerIndexer != null) workerIndexer.close();
+					if (workerDbConn != null) {
+						try { workerDbConn.close(); } catch (SQLException e) { /* ignore */ }
+					}
+					logger.info("Worker-" + workerId + " finished");
+				}
+			});
+		}
+
+		// Wait for workers
+		workerPool.shutdown();
+		try {
+			workerPool.awaitTermination(48, TimeUnit.HOURS);
+		} catch (InterruptedException e) {
+			logger.error("Interrupted waiting for workers", e);
+			workerPool.shutdownNow();
+		}
+		try { producer.join(60000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+
+		// Check for exceptions
+		for (int i = 0; i < futures.length; i++) {
+			try {
+				futures[i].get();
+			} catch (ExecutionException e) {
+				logger.error("Worker-" + i + " threw exception", e.getCause());
+			} catch (Exception e) {
+				logger.error("Error checking worker-" + i, e);
+			}
+		}
+
+		double totalSec = (System.currentTimeMillis() - startMs) / 1000.0;
+		double rate = totalProcessed.get() / totalSec;
+		logEntry.addNote(String.format("Threaded reindex complete: %,d works in %.0fs (%.0f works/sec), %d errors",
+			totalProcessed.get(), totalSec, rate, totalErrors.get()));
+		logger.info(String.format("Threaded reindex complete: %,d works in %.0fs (%.0f works/sec), %d errors",
+			totalProcessed.get(), totalSec, rate, totalErrors.get()));
 	}
 
 	private static void initializeReindex() {

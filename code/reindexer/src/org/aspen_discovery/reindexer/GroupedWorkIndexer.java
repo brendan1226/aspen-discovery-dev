@@ -208,6 +208,7 @@ public class GroupedWorkIndexer implements AutoCloseable {
 	private int hooplaVersion;
 	private int solrThreadCount;
 	private int solrQueueSize;
+	private int numReindexWorkerThreads = 1;
 	private String solrPort;
 	private String solrHost;
 
@@ -254,7 +255,7 @@ public class GroupedWorkIndexer implements AutoCloseable {
 		}
 
 		//Load general settings for the indexer from System Variables
-		try (PreparedStatement systemVariablesStmt = dbConn.prepareStatement("SELECT storeRecordDetailsInSolr, storeRecordDetailsInDatabase, indexVersion, searchVersion, processEmptyGroupedWorks, enableNovelistSeriesIntegration, deletionCommitInterval, waitAfterDeleteCommit, removeTheWordSeriesFromEndOfSeries, hooplaVersion, indexCommitInterval, solrThreadCount, solrQueueSize from system_variables")){
+		try (PreparedStatement systemVariablesStmt = dbConn.prepareStatement("SELECT storeRecordDetailsInSolr, storeRecordDetailsInDatabase, indexVersion, searchVersion, processEmptyGroupedWorks, enableNovelistSeriesIntegration, deletionCommitInterval, waitAfterDeleteCommit, removeTheWordSeriesFromEndOfSeries, hooplaVersion, indexCommitInterval, solrThreadCount, solrQueueSize, numReindexWorkerThreads from system_variables")){
 			try (ResultSet systemVariablesRS = systemVariablesStmt.executeQuery()) {
 				if (systemVariablesRS.next()) {
 					this.storeRecordDetailsInSolr = systemVariablesRS.getBoolean("storeRecordDetailsInSolr");
@@ -271,6 +272,8 @@ public class GroupedWorkIndexer implements AutoCloseable {
 					this.hooplaVersion = systemVariablesRS.getInt("hooplaVersion");
 					this.solrThreadCount = systemVariablesRS.getInt("solrThreadCount");
 					this.solrQueueSize = systemVariablesRS.getInt("solrQueueSize");
+					try { this.numReindexWorkerThreads = systemVariablesRS.getInt("numReindexWorkerThreads"); } catch (Exception ignored) {}
+					if (this.numReindexWorkerThreads < 1) this.numReindexWorkerThreads = 1;
 				}
 			}
 		} catch (Exception e){
@@ -691,6 +694,10 @@ public class GroupedWorkIndexer implements AutoCloseable {
 
 	public boolean isOkToIndex(){
 		return okToIndex;
+	}
+
+	public int getNumReindexWorkerThreads(){
+		return numReindexWorkerThreads;
 	}
 
 	TreeSet<String> overDriveRecordsSkipped = new TreeSet<>();

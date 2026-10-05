@@ -29,6 +29,8 @@ class SystemVariables extends DataObject {
 	/** @noinspection PhpUnused */
 	public $solrQueueSize;
 	/** @noinspection PhpUnused */
+	public $numReindexWorkerThreads;
+	/** @noinspection PhpUnused */
 	public $waitAfterDeleteCommit;
 	/** @noinspection PhpUnused */
 	public $indexVersion;
@@ -268,6 +270,15 @@ class SystemVariables extends DataObject {
 						'default' => 25,
 						'min' => 25,
 						'max' => 1000,
+					],
+					'numReindexWorkerThreads' => [
+						'property' => 'numReindexWorkerThreads',
+						'type' => 'integer',
+						'label' => 'Number of Reindex Worker Threads',
+						'description' => 'The number of parallel worker threads to use during a full grouped work reindex. Each worker uses its own database connection and indexer instance. Set to 1 for the standard single-threaded reindex. Higher values dramatically speed up full reindexes on servers with spare CPU, database, and Solr capacity.',
+						'default' => 1,
+						'min' => 1,
+						'max' => 16,
 					],
 					'waitAfterDeleteCommit' => [
 						'property' => 'waitAfterDeleteCommit',

@@ -4374,6 +4374,7 @@ class User extends DataObject {
 		$sections['system_admin']->addAction(new AdminAction('Manually Run Cron', 'Manually Start Cron Processes.', '/Admin/CronRunner'), 'Manually Run Cron Processes');
 		$sections['system_admin']->addAction(new AdminAction('Consolidate Reading History', 'Consolidate Reading History Entries to minimize database size.', '/Admin/ConsolidateReadingHistory'), 'Perform System Maintenance');
 		$sections['system_admin']->addAction(new AdminAction('Indexer Information', 'View information about the indexers running on the system.', '/Admin/IndexerInformation'), 'Perform System Maintenance');
+		$sections['system_admin']->addAction(new AdminAction('Turbo Reindex', 'Run a one-time parallel reindex of all grouped works using multiple threads for dramatically faster processing.', '/Admin/ParallelReindex'), 'Perform System Maintenance');
 
 		$oauth2Action = new AdminAction('OAuth2 Clients', 'Manage OAuth2 clients for API access, third-party integrations, and authentication tokens.', '/Admin/OAuth2Clients');
 		$sections['system_admin']->addAction($oauth2Action, 'Administer OAuth2');

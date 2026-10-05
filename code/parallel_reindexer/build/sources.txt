@@ -1,0 +1,11 @@
+/Users/brendan/git/aspen-discovery/code/parallel_reindexer/src/com/bws/aspen/parallel_reindexer/BulkLoadWorker.java
+/Users/brendan/git/aspen-discovery/code/parallel_reindexer/src/com/bws/aspen/parallel_reindexer/ParallelReindexMain.java
+/Users/brendan/git/aspen-discovery/code/parallel_reindexer/src/com/bws/aspen/parallel_reindexer/WorkProducer.java
+/Users/brendan/git/aspen-discovery/code/parallel_reindexer/src/com/bws/aspen/parallel_reindexer/KohaBulkExtractor.java
+/Users/brendan/git/aspen-discovery/code/parallel_reindexer/src/com/bws/aspen/parallel_reindexer/MigrationProgressTracker.java
+/Users/brendan/git/aspen-discovery/code/parallel_reindexer/src/com/bws/aspen/parallel_reindexer/MarcBatch.java
+/Users/brendan/git/aspen-discovery/code/parallel_reindexer/src/com/bws/aspen/parallel_reindexer/TurboMigrationMain.java
+/Users/brendan/git/aspen-discovery/code/parallel_reindexer/src/com/bws/aspen/parallel_reindexer/WorkUnit.java
+/Users/brendan/git/aspen-discovery/code/parallel_reindexer/src/com/bws/aspen/parallel_reindexer/ProgressTracker.java
+/Users/brendan/git/aspen-discovery/code/parallel_reindexer/src/com/bws/aspen/parallel_reindexer/ParallelReindexConfig.java
+/Users/brendan/git/aspen-discovery/code/parallel_reindexer/src/com/bws/aspen/parallel_reindexer/IndexerWorker.java
